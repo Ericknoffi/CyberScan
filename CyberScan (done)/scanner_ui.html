@@ -1,0 +1,307 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberScan Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        .gradient-text {
+            background: linear-gradient(to right, #60a5fa, #34d399);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .spinner { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="flex items-center justify-center min-h-screen p-8">
+        <div class="w-full max-w-3xl space-y-8">
+            <div class="text-center">
+                <h1 class="text-4xl font-extrabold gradient-text">CyberScan Dashboard</h1>
+                <p class="mt-2 text-lg text-gray-400">Automated Security Vulnerability Scanner</p>
+                <!-- Example SQL injection link removed -->
+            </div>
+            <div class="w-full p-6 rounded-lg shadow-xl bg-gray-800 border border-gray-600">
+                <h2 class="text-xl font-bold text-white mb-4">Security Scanner</h2>
+                <div class="mb-6">
+                    <label class="block text-sm font-semibold text-gray-400 mb-2">Target URL or IP Address</label>
+                    <input type="text" id="urlInput" placeholder="e.g., https://example.com" class="w-full px-4 py-2 text-white bg-gray-800 border border-gray-700 rounded-md focus:ring-2 focus:ring-blue-500 placeholder-gray-500">
+                </div>
+                <div class="space-x-4">
+                    <button id="quickScanBtn" class="px-6 py-3 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-md">
+                        <span id="quickText">Quick Scan</span>
+                    </button>
+                    <button id="fullScanBtn" class="px-6 py-3 font-bold text-white bg-green-600 hover:bg-green-700 rounded-md">
+                        <span id="fullText">Full Scan</span>
+                    </button>
+                    <!-- Test Connection button removed -->
+                </div>
+            </div>
+            <div id="statusDiv" class="p-4 bg-gray-700 rounded-md">
+                <span id="status">Ready to scan...</span>
+            </div>
+            <div id="resultsDiv" class="hidden w-full p-6 rounded-lg shadow-xl bg-gray-800 border border-gray-600">
+                <h2 class="text-xl font-bold text-white mb-4">Scan Results</h2>
+                <pre id="results" class="p-4 text-sm text-green-400 bg-gray-900 rounded-md overflow-x-auto whitespace-pre-wrap"></pre>
+            </div>
+        </div>
+    </div>
+    <script>
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') e.preventDefault();
+        }, true);
+        var status = document.getElementById('status');
+        var statusDiv = document.getElementById('statusDiv');
+        var results = document.getElementById('results');
+        var resultsDiv = document.getElementById('resultsDiv');
+        var urlInput = document.getElementById('urlInput');
+
+        function setStatus(msg, isError = false) {
+            // console log removed for security
+            status.textContent = msg;
+            statusDiv.className = isError ? 'p-4 bg-red-900 border border-red-700 rounded-md' : 'p-4 bg-gray-700 rounded-md';
+        }
+
+        function showResults(data) {
+            // console log removed for security
+                if (data.results) {
+                    let html = '';
+                    // BASIC INFO
+                    if (data.results.basic_info) {
+                        // console log removed for security
+                        // Parse and format basic info for neat display
+                        let lines = data.results.basic_info.split(/\r?\n/).map(l => l.trim()).filter(l => l);
+                        let secHeaders = [];
+                        let advHeaders = [];
+                        let cookies = [];
+                        let section = '';
+                        lines.forEach(line => {
+                            if (line.match(/Basic Security Headers/i)) section = 'sec';
+                            else if (line.match(/Advanced Security Headers/i)) section = 'adv';
+                            else if (line.match(/Cookies Flags Check/i)) section = 'cookie';
+                            else if (section === 'sec' && line.match(/:/)) secHeaders.push(line);
+                            else if (section === 'adv' && line.match(/:/)) advHeaders.push(line);
+                            else if (section === 'cookie') cookies.push(line);
+                        });
+                        function highlightFinding(text) {
+                            if (text.match(/Missing/i)) {
+                                return `<span class='text-red-400 font-bold'>${text}</span>`;
+                            } else {
+                                return `<span class='text-green-400'>${text}</span>`;
+                            }
+                        }
+                        html += `<details open class="mb-2">
+                            <summary class="font-bold text-blue-400 text-lg">Basic Info</summary>
+                            <div class="text-sm">
+                                <div class="font-semibold text-blue-300 mb-1">Basic Security Headers</div>
+                                <ul class="ml-4 mb-2">
+                                    ${secHeaders.length ? secHeaders.map(h => `<li>${highlightFinding(h)}</li>`).join('') : '<li class="text-gray-400">None found.</li>'}
+                                </ul>
+                                <div class="font-semibold text-blue-300 mb-1">Advanced Security Headers</div>
+                                <ul class="ml-4 mb-2">
+                                    ${advHeaders.length ? advHeaders.map(h => `<li>${highlightFinding(h)}</li>`).join('') : '<li class="text-gray-400">None found.</li>'}
+                                </ul>
+                                <div class="font-semibold text-blue-300 mb-1">Cookies Flags Check</div>
+                                <ul class="ml-4">
+                                    ${cookies.length ? cookies.map(c => `<li>${highlightFinding(c)}</li>`).join('') : '<li class="text-gray-400">No cookies found.</li>'}
+                                </ul>
+                            </div>
+                        </details>`;
+                    }
+                    // PORT SCAN (simple summary)
+                    if (data.results.port_scan) {
+                        html += renderPortScan(data.results.port_scan);
+                    }
+                    // SQLMAP (simple summary)
+                    if (data.results.sqlmap) {
+                        html += renderSqlmapScan(data.results.sqlmap);
+                    }
+                    results.innerHTML = html || `<span class="text-gray-400">No results found.</span>`;
+                } else {
+                    results.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+                }
+        // Render port scan summary
+        function renderPortScan(raw) {
+            // console log removed for security
+            // Extract open ports and host info
+            let openPorts = [];
+            let host = '';
+            let findings = [];
+            let lines = raw.split('\n');
+            lines.forEach(line => {
+                // Only actionable findings, hide banners and unrelated info
+                let portMatch = line.match(/(\d+\/tcp)\s+open\s+(\w+)/);
+                if (portMatch) {
+                    openPorts.push({port: portMatch[1], service: portMatch[2]});
+                    findings.push(`Port ${portMatch[1]} is open (${portMatch[2]})`);
+                }
+                let hostMatch = line.match(/Nmap scan report for ([^ ]+)/);
+                if (hostMatch) host = hostMatch[1];
+                // Look for vulnerabilities or errors, exclude banners/progress
+                if (line.match(/vulnerab|error|risk|bad gateway|filtered/i) &&
+                    !line.match(/banner|scan started|scan finished|progress|disclaimer|copyright|author|usage|\*\*|==|--|\[INFO\]|\[STATUS\]/i)) {
+                    findings.push(line);
+                }
+            });
+            function highlightFinding(text) {
+                if (text.match(/Missing/i)) {
+                    return `<span class='text-red-400 font-bold'>${text}</span>`;
+                } else {
+                    return `<span class='text-green-400'>${text}</span>`;
+                }
+            }
+            let html = `<details open class="mb-2">
+                <summary class="font-bold text-green-400 text-lg">Port Scan</summary>
+                <div class="text-sm">
+                    <div><span class="font-semibold">Host:</span> <span class="text-blue-300">${host || 'Unknown'}</span></div>
+                    <div class="font-semibold mt-1">Findings:</div>
+                    <ul class="list-disc ml-4">
+                        ${findings.length ? findings.map(f => `<li>${highlightFinding(f)}</li>`).join('') : '<li class="text-gray-400">No issues found.</li>'}
+                    </ul>
+                </div>
+            </details>`;
+            return html;
+        }
+
+        // Render sqlmap scan summary
+        function renderSqlmapScan(raw) {
+            // console log removed for security
+            // Extract warnings, info, and summary
+            let findings = [];
+            let lines = raw.split('\n');
+            lines.forEach(line => {
+                // Only actionable findings, hide banners and unrelated info
+                if ((line.match(/^\[WARNING\]|^\[ERROR\]|vulnerab|injection|parameter|payload|risk|found/i)) &&
+                    !line.match(/banner|scan started|scan finished|progress|disclaimer|copyright|author|usage|\*\*|==|--|\[INFO\]|\[STATUS\]/i)) {
+                    findings.push(line);
+                }
+            });
+            function highlightFinding(text) {
+                if (text.match(/Missing/i)) {
+                    return `<span class='text-red-400 font-bold'>${text}</span>`;
+                } else {
+                    return `<span class='text-green-400'>${text}</span>`;
+                }
+            }
+            let html = `<details open class="mb-2">
+                <summary class="font-bold text-yellow-400 text-lg">SQLMap</summary>
+                <div class="text-sm">
+                    <div class="font-semibold mt-1">Findings:</div>
+                    <ul class="list-disc ml-4">
+                        ${findings.length ? findings.map(f => `<li>${highlightFinding(f)}</li>`).join('') : '<li class="text-gray-400">No issues found.</li>'}
+                    </ul>
+                </div>
+            </details>`;
+            return html;
+        }
+            resultsDiv.classList.remove('hidden');
+            // Displayed results log removed for privacy
+        }
+
+        // Helper to format each section for readability
+        function formatSection(text, type) {
+            // Escape HTML
+            text = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            // Highlight warnings/errors/findings
+            text = text.replace(/\[\!\]/g, '<span class="text-red-400 font-bold">[!]</span>');
+            text = text.replace(/\[\*\]/g, '<span class="text-blue-300 font-bold">[*]</span>');
+            text = text.replace(/\[\+\]/g, '<span class="text-green-400 font-bold">[+]</span>');
+            // Section-specific formatting
+            if (type === 'basic') {
+                text = text.replace(/Missing/g, '<span class="text-red-400">Missing</span>');
+            }
+            if (type === 'port') {
+                text = text.replace(/open/g, '<span class="text-green-400">open</span>');
+                text = text.replace(/filtered/g, '<span class="text-yellow-400">filtered</span>');
+            }
+            if (type === 'sqlmap') {
+                text = text.replace(/WARNING/g, '<span class="text-yellow-400 font-bold">WARNING</span>');
+                text = text.replace(/INFO/g, '<span class="text-blue-400 font-bold">INFO</span>');
+            }
+            // Preserve line breaks
+            return text.replace(/\n/g, '<br>');
+        }
+
+        function setLoading(btn, textElement, isLoading, originalText) {
+            // Log removed for privacy
+            if (isLoading) {
+                btn.disabled = true;
+                textElement.innerHTML = `<svg class=\"w-5 h-5 spinner inline mr-2\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"></circle><path d=\"m9 12 2 2 4-4\"></path></svg>Scanning...`;
+            } else {
+                btn.disabled = false;
+                textElement.textContent = originalText;
+            }
+        }
+
+        // Removed broken testBtn code
+
+        document.getElementById('quickScanBtn').onclick = function(event) {
+            console.log('[quickScanBtn] Clicked');
+            event.preventDefault();
+            const url = urlInput.value.trim();
+            if (!url) {
+                console.warn('[quickScanBtn] No URL entered');
+                setStatus('Please enter a URL', true);
+                return;
+            }
+            const btn = this;
+            const textEl = document.getElementById('quickText');
+            setLoading(btn, textEl, true, 'Quick Scan');
+            setStatus('Running quick scan...');
+                axios.post('http://localhost:5000/api/scan', {
+                    url: url,
+                    scans: ['basic']
+                }, { timeout: 30000 })
+                .then(response => {
+                    setStatus('✅ Quick scan completed!');
+                    showResults(response.data);
+                })
+            .catch(error => {
+                console.error('[quickScanBtn] Error:', error);
+                setStatus('❌ Quick scan failed: ' + error.message, true);
+            })
+            .finally(() => {
+                setLoading(btn, textEl, false, 'Quick Scan');
+                    // Handler finished log removed for privacy
+            });
+        };
+
+        document.getElementById('fullScanBtn').onclick = function(event) {
+            console.log('[fullScanBtn] Clicked');
+            event.preventDefault();
+            const url = urlInput.value.trim();
+            if (!url) {
+                console.warn('[fullScanBtn] No URL entered');
+                setStatus('Please enter a URL', true);
+                return;
+            }
+            const btn = this;
+            const textEl = document.getElementById('fullText');
+            setLoading(btn, textEl, true, 'Full Scan');
+            setStatus('Running full scan... (may take several minutes)');
+                axios.post('http://localhost:5000/api/scan', {
+                    url: url,
+                    scans: ['basic', 'port', 'sqlmap']
+                }, { timeout: 300000 })
+                .then(response => {
+                    setStatus('✅ Full scan completed!');
+                    showResults(response.data);
+                })
+            .catch(error => {
+                console.error('[fullScanBtn] Error:', error);
+                setStatus('❌ Full scan failed: ' + error.message, true);
+            })
+            .finally(() => {
+                setLoading(btn, textEl, false, 'Full Scan');
+                    // Handler finished log removed for privacy
+            });
+        };
+    </script>
+</body>
+</html>
+
